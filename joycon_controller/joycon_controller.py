@@ -16,7 +16,7 @@ class JoyConController(Node):
     def on_timer(self):
         pitch, roll, yaw = self.jc.get_euler_rad()  # (pitch, roll, yaw) に整形済みとするなら適宜変更
         msg = Float64()
-        msg.data = pitch
+        msg.data = yaw
         self.pub_pitch.publish(msg)
 
     def on_rumble(self, msg: Float64):

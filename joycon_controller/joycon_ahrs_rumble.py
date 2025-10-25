@@ -59,6 +59,27 @@ def _euler_zyx_from_quat(q) -> Tuple[float, float, float]:
     roll = math.atan2(sinr_cosp, cosr_cosp)
     return (yaw, pitch, roll)
 
+class RumbleJoyCon(JoyCon):
+    def __init__(self, *args, **kwargs):
+        JoyCon.__init__(self,*args, **kwargs)
+        
+    def _send_rumble(self,data=b'\x00\x00\x00\x00\x00\x00\x00\x00'):
+        self._RUMBLE_DATA = data
+        self._write_output_report(b'\x10', b'', b'')
+
+    def enable_vibration(self,enable=True):
+        """Sends enable or disable command for vibration. Seems to do nothing."""
+        self._write_output_report(b'\x01', b'\x48', b'\x01' if enable else b'\x00')
+        
+    def rumble_simple(self):
+        """Rumble for approximately 1.5 seconds (why?). Repeat sending to keep rumbling."""
+        print("揺れる")
+        self._send_rumble(b'\x98\x1e\xc6\x47\x98\x1e\xc6\x47')
+
+    def rumble_stop(self):
+        """Instantly stops the rumble"""
+        self._send_rumble()
+
 class JoyConAHRSRumbler:
     """
     - DCM + complementary filter (gyro integral + accel gravity correction)

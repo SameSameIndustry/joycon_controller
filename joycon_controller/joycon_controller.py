@@ -1,43 +1,30 @@
+# joycon_pitch_node.py
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float64
-
-from pyjoycon import JoyCon, get_R_id, get_L_id, get_gyro_x
+from joycon_controller.joycon_ahrs_rumble import JoyConAHRSRumbler
 
 class JoyConController(Node):
     def __init__(self):
         super().__init__('joycon_controller')
-        joycon_r_id = get_R_id()
-        joycon_l_id = get_L_id()
-        self.joycon_r = JoyCon(*joycon_r_id)
-        self.joycon_l = JoyCon(*joycon_l_id)
+        self.jc = JoyConAHRSRumbler("R", alpha=0.03)
+        self.pub_pitch = self.create_publisher(Float64, '~/ref_pitch', 10)
+        self.sub_rumble = self.create_subscription(Float64, '~/rumble', self.on_rumble, 10)
+        self.create_timer(0.01, self.on_timer)  # 100 Hz
+        self.jc.recenter_yaw()
 
-        self.ref_theta_r = self.create_publisher(Float64, '~/ref_theta_r', 10)
-        self.ref_theta_l = self.create_publisher(Float64, '~/ref_theta_l', 10)
-        self.ref_pitch = self.create_publisher(Float64, '~/ref_pitch', 10)
-        self.timer = self.create_timer(0.1, self.timer_callback)
+    def on_timer(self):
+        pitch, roll, yaw = self.jc.get_euler_rad()  # (pitch, roll, yaw) に整形済みとするなら適宜変更
+        msg = Float64()
+        msg.data = pitch
+        self.pub_pitch.publish(msg)
 
-    def timer_callback(self):
-        status_r = self.joycon_r.get_status()
-        status_l = self.joycon_l.get_status()
-        print(status_l)
-        gyro_r = status_r['gyro']
-        gyro_l = status_l['gyro']
+    def on_rumble(self, msg: Float64):
+        amp = float(msg.data)
+        self.jc.rumble(amplitude=abs(amp), side="R" if amp >= 0 else "L", duration_ms=120)
 
-        ref_r = Float64()
-        ref_l = Float64()
-
-        # 右スティックジャイロで右腕上下
-        ref_r.data = -gyro_r['y']
-        
-        self.ref_theta_r.publish(ref_r)
-
-        # 左スティックジャイロで左腕上下
-        # ref_l.data = -gyro_l['y']
-        # self.ref_theta_l.publish(ref_l)
-
-def main(args=None):
-    rclpy.init(args=args)
+def main():
+    rclpy.init()
     node = JoyConController()
     rclpy.spin(node)
     node.destroy_node()

@@ -1,4 +1,3 @@
-# joycon_ahrs_rumble.py
 import math, time
 from typing import Tuple, Optional
 from pyjoycon import JoyCon, get_R_id, get_L_id
@@ -87,10 +86,11 @@ class JoyConAHRSRumbler:
     - recenter_yaw(): zero the current yaw
     - rumble(): HD rumble (reverse-engineered encoding, JoyconLib 相当)
     """
-    def __init__(self, side: str = "R", alpha: float = 0.02):
+    def __init__(self, side: str = "R", alpha: float = 0.02, calibration_samples: int = 300):
         """
         side: "R" or "L"
         alpha: accel信頼度（0..~0.2推奨）大きいほど重力に強く引き寄せ
+        calibration_samples: 起動時に静止させてキャリブレーションするIMUサンプル数 (1レポート3サンプル)
         """
         assert side in ("R","L")
         self.side = side
@@ -117,9 +117,24 @@ class JoyConAHRSRumbler:
         self._pkt_ts = time.time()
         self._gn = [0.0, 0.0, 1.0]  # gravity (down) estimate
         self._global_count = 0
+        
+        # --- [追加] ジャイロバイアス・キャリブレーション用 ---
+        self.gyro_bias = [0.0, 0.0, 0.0] # (gx, gy, gz) LSB
+        self._calibrating = True
+        self._calibration_data = [] # (gx_raw, gy_raw, gz_raw)
+        self._calibration_target_count = calibration_samples
+        print(f"Joy-Con {self.side}: Calibrating gyroscope... Please keep it still.")
+        # --- [追加ここまで] ---
 
         # daemon callback
         self.jc.register_update_hook(self._on_report)
+        
+        # --- [追加] キャリブレーションが完了するまで待機 ---
+        while self._calibrating:
+            time.sleep(0.05)
+        print(f"Joy-Con {self.side}: Calibration complete. Bias (LSB): {self.gyro_bias[0]:.2f}, {self.gyro_bias[1]:.2f}, {self.gyro_bias[2]:.2f}")
+        # --- [追加ここまで] ---
+
 
     # ------------- IMU fusion (DCM + complementary) -------------
     def _on_report(self, jc: JoyCon):
@@ -128,9 +143,37 @@ class JoyConAHRSRumbler:
         dt_sample = REPORT_PERIOD / 3.0  # ≈ 0.005s
 
         for s in (0,1,2):
-            gx = jc.get_gyro_x(s) * GYRO_LSB_TO_RAD
-            gy = jc.get_gyro_y(s) * GYRO_LSB_TO_RAD
-            gz = jc.get_gyro_z(s) * GYRO_LSB_TO_RAD
+            
+            # --- [追加] キャリブレーション処理 ---
+            if self._calibrating:
+                gx_raw = jc.get_gyro_x(s)
+                gy_raw = jc.get_gyro_y(s)
+                gz_raw = jc.get_gyro_z(s)
+                self._calibration_data.append((gx_raw, gy_raw, gz_raw))
+                
+                if len(self._calibration_data) >= self._calibration_target_count:
+                    # 平均をバイアスとして計算
+                    sum_g = [0.0, 0.0, 0.0]
+                    for data in self._calibration_data:
+                        sum_g[0] += data[0]
+                        sum_g[1] += data[1]
+                        sum_g[2] += data[2]
+                    count = len(self._calibration_data)
+                    self.gyro_bias = [sum_g[0]/count, sum_g[1]/count, sum_g[2]/count]
+                    self._calibrating = False
+                    self._calibration_data = [] # メモリ解放
+                continue # キャリブレーション中は姿勢計算しない
+            # --- [追加ここまで] ---
+            
+            # --- [修正] バイアス除去 ---
+            gx_raw = jc.get_gyro_x(s) - self.gyro_bias[0]
+            gy_raw = jc.get_gyro_y(s) - self.gyro_bias[1]
+            gz_raw = jc.get_gyro_z(s) - self.gyro_bias[2]
+            
+            gx = gx_raw * GYRO_LSB_TO_RAD
+            gy = gy_raw * GYRO_LSB_TO_RAD
+            gz = gz_raw * GYRO_LSB_TO_RAD
+            # --- [修正ここまで] ---
 
             ax = float(jc.get_accel_x(s))
             ay = float(jc.get_accel_y(s))
@@ -218,13 +261,18 @@ class JoyConAHRSRumbler:
         q = self.get_quat()
         yaw,pitch,roll = _euler_zyx_from_quat(q)
         # 出力順を (pitch, roll, yaw) にしたい場合は並べ替え可
-        return (pitch, roll, yaw)
+        return (pitch, roll, yaw) # デモに合わせて (pitch, roll, yaw) を返す
 
     def recenter_yaw(self):
         # 現在のyawを0にリセット
         q = _quat_from_dcm(self.i_b, self.j_b, self.k_b)
         yaw,_,_ = _euler_zyx_from_quat(q)
         self.yaw_bias = yaw
+    
+    def check_reset_yaw(self):
+        # lボタンもしくは rボタンが押されたらyawリセット
+        if (self.side == "L" and self.jc.get_button_l()) or (self.side == "R" and self.jc.get_button_r()):
+            self.recenter_yaw()
 
     # ------------- HD Rumble (Output report 0x10) -------------
     def rumble(self, amplitude: float, side: Optional[str] = None,
@@ -292,17 +340,21 @@ class JoyConAHRSRumbler:
 
 # ---------------------- 簡易デモ ----------------------
 if __name__ == "__main__":
-    jc = JoyConAHRSRumbler("R", alpha=0.03)
-    print("Press Ctrl+C to exit. Re-centering yaw in 1.0s...")
-    time.sleep(1.0)
+    # [修正] calibration_samples を指定 (300サンプル = 100レポート分 ≈ 1.5秒)
+    # Joy-Conを静止させた状態でプログラムを開始してください
+    jc = JoyConAHRSRumbler("R", alpha=0.03, calibration_samples=300)
+    
+    # (キャリブレーションは __init__ 内で待機・完了される)
+    
+    print("Press Ctrl+C to exit. Re-centering yaw...")
+    # time.sleep(1.0) # __init__内で待機するため不要
     jc.recenter_yaw()
     try:
         last_print = time.time()
         while True:
             if time.time() - last_print > 0.05:
-                yaw, pitch, roll = jc.get_euler_rad()  # ZYX順を返す場合は関数内で調整
-                # ここでは (pitch, roll, yaw) に並べ替えて表示
-                p, r, y = pitch, roll, yaw
+                # get_euler_rad() は (pitch, roll, yaw) を返すように変更済み
+                p, r, y = jc.get_euler_rad()
                 print(f"pitch={p:+.3f} rad, roll={r:+.3f} rad, yaw={y:+.3f} rad", end="\r")
                 last_print = time.time()
             time.sleep(0.001)

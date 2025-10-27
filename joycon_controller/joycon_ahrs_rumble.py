@@ -59,7 +59,7 @@ def _euler_zyx_from_quat(q) -> Tuple[float, float, float]:
     roll = math.atan2(sinr_cosp, cosr_cosp)
     return (yaw, pitch, roll)
 
-class RumbleJoyCon(JoyCon):
+class JoyConWithRumble(JoyCon):
     def __init__(self, *args, **kwargs):
         JoyCon.__init__(self,*args, **kwargs)
         
@@ -99,7 +99,7 @@ class JoyConAHRSRumbler:
         ids = get_R_id() if side == "R" else get_L_id()
         if None in ids:
             raise RuntimeError(f"Joy-Con {side} not found.")
-        self.jc = JoyCon(*ids)
+        self.jc = JoyConWithRumble(*ids)
 
         # HID device for rumble (pyjoyconは0x10で固定ゼロ振幅を送るため、自前で送る)
         self.dev: Optional[hid.Device] = None
@@ -250,6 +250,9 @@ class JoyConAHRSRumbler:
             time.sleep(duration_ms/1000.0)
             pkt[2:10] = b'\x00\x01\x40\x40\x00\x01\x40\x40'
             self.dev.write(pkt)
+    
+    def rumble_simple(self):
+        self.jc.rumble_simple()
 
     def _encode_rumble(self, low_f: float, high_f: float, amplitude: float) -> bytes:
         # JoyconLib と dekuNukem の逆解析式に基づく近似エンコード

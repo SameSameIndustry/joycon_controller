@@ -3,7 +3,6 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float64, Empty
 from joycon_controller.joycon_ahrs_rumble import JoyConAHRSRumbler
-from pyjoycon import get_R_id, JoyCon
 
 class JoyConController(Node):
     def __init__(self):
@@ -13,6 +12,11 @@ class JoyConController(Node):
         self.pub_theta_r = self.create_publisher(Float64, '~/ref_theta_r', 10)
         self.pub_theta_l = self.create_publisher(Float64, '~/ref_theta_l', 10)
         self.pub_pitch = self.create_publisher(Float64, '~/ref_pitch', 10)
+        
+        # arm_moveのハンド動かす奴ら
+        self.pub_hand_catch = self.create_publisher(Empty, '/arm_move/catch_motion', 10)
+        self.pub_hand_open = self.create_publisher(Empty, '/arm_move/release_motion', 10)
+
         self.sub_rumble = self.create_subscription(Empty, '~/rumble', self.on_rumble, 10)
         self.create_timer(0.01, self.on_timer)  # 100 Hz
         self.jc_r.recenter_yaw()
@@ -35,11 +39,18 @@ class JoyConController(Node):
         self.jc_r.check_reset_yaw()
         self.jc_l.check_reset_yaw()
 
+        if(self.jc_r.is_button_a_pressed() or self.jc_l.is_button_a_pressed()):
+            self.get_logger().info("Catch motion triggered")
+            self.pub_hand_catch.publish(Empty())
+        if(self.jc_r.is_button_b_pressed() or self.jc_l.is_button_b_pressed()):
+            self.get_logger().info("Release motion triggered")
+            self.pub_hand_open.publish(Empty())
+
+
+
     def on_rumble(self, msg: Empty):
         self.jc_r.rumble_simple()
         self.jc_l.rumble_simple()
-        # self.jc_r.rumble(amplitude=abs(amp), side="R" if amp >= 0 else "L", duration_ms=120)
-        # self.jc_l.rumble(amplitude=abs(amp), side="L" if amp >= 0 else "L", duration_ms=120)
 
 def main():
     rclpy.init()

@@ -271,8 +271,13 @@ class JoyConAHRSRumbler:
     
     def check_reset_yaw(self):
         # lボタンもしくは rボタンが押されたらyawリセット
-        if (self.side == "L" and self.jc.get_button_l()) or (self.side == "R" and self.jc.get_button_r()):
+        if (self.side == "L" and self.jc.get_button_l() and self.jc.get_button_zl() and self.jc.get_button_minus()) or (self.side == "R" and self.jc.get_button_r() and self.jc.get_button_zr() and self.jc.get_button_plus()):
             self.recenter_yaw()
+    
+    def is_button_a_pressed(self) -> bool:
+        return self.jc.get_button_a()
+    def is_button_b_pressed(self) -> bool:
+        return self.jc.get_button_b()
 
     # ------------- HD Rumble (Output report 0x10) -------------
     def rumble(self, amplitude: float, side: Optional[str] = None,
